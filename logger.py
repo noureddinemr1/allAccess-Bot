@@ -28,6 +28,10 @@ class Logger:
         self._write("error", data)
     
     def screenshot(self, page, step: str) -> str:
+        from config import DEBUG_SCREENSHOTS
+        if not DEBUG_SCREENSHOTS:
+            return None
+            
         timestamp = datetime.now().strftime("%H%M%S")
         filename = f"screenshots/account_{self.account_id}_{step}_{timestamp}.png"
         try:
@@ -35,5 +39,4 @@ class Logger:
             self.info({"step": f"screenshot_{step}", "file": filename})
             return filename
         except Exception as e:
-            self.error({"step": f"screenshot_{step}_failed", "error": str(e)})
             return None

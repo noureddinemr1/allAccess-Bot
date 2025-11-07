@@ -5,8 +5,9 @@ from playwright.sync_api import sync_playwright, Browser, BrowserContext, Page
 from logger import Logger
 from captcha import solve_recaptcha_v2, inject_token, extract_sitekey
 from queue_handler import handle_queue
-from checkout import select_tickets, prepare_checkout, finalize_purchase
-from config import EVENT_URL, HEADLESS, DEBUG_SCREENSHOTS
+from checkout import prepare_checkout, finalize_purchase
+from allaccess_flow import handle_allaccess_flow
+from config import EVENT_URL, HEADLESS, DEBUG_SCREENSHOTS, TICKET_TYPE, TICKET_COUNT
 
 def create_browser_context(playwright, account_id: str, proxy: Optional[str], headless: bool) -> tuple[Browser, BrowserContext]:
     """Create isolated browser context with proxy."""
@@ -21,15 +22,15 @@ def create_browser_context(playwright, account_id: str, proxy: Optional[str], he
         ]
     }
     
+    if proxy:
+        launch_options["proxy"] = {"server": proxy}
+    
     browser = playwright.chromium.launch(**launch_options)
     
     context_options = {
         "viewport": {"width": 1920, "height": 1080},
         "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
-    
-    if proxy:
-        context_options["proxy"] = {"server": proxy}
     
     context = browser.new_context(**context_options)
     return browser, context
@@ -42,8 +43,51 @@ def perform_login(page: Page, account: Dict[str, Any], logger: Logger) -> bool:
         page.goto("https://www.allaccess.com.ar/login", wait_until="networkidle", timeout=30000)
         logger.screenshot(page, "login_page")
         
-        page.fill('input[type="email"], input[name*="email"], input[name*="usuario"]', account.get("email"))
-        page.fill('input[type="password"], input[name*="password"], input[name*="contraseña"]', account.get("password"))
+        email_selectors = [
+            'input[type="email"]',
+            'input[name*="email" i]',
+            'input[name*="usuario" i]',
+            'input[id*="email" i]',
+            'input[placeholder*="email" i]',
+            'input[placeholder*="correo" i]'
+        ]
+        
+        password_selectors = [
+            'input[type="password"]',
+            'input[name*="password" i]',
+            'input[name*="contraseña" i]',
+            'input[id*="password" i]'
+        ]
+        
+        email_filled = False
+        for selector in email_selectors:
+            try:
+                if page.locator(selector).count() > 0:
+                    page.fill(selector, account.get("email"), timeout=5000)
+                    email_filled = True
+                    logger.info({"step": "email_filled", "selector": selector})
+                    break
+            except:
+                continue
+        
+        if not email_filled:
+            logger.error({"step": "email_field_not_found"})
+            return False
+        
+        password_filled = False
+        for selector in password_selectors:
+            try:
+                if page.locator(selector).count() > 0:
+                    page.fill(selector, account.get("password"), timeout=5000)
+                    password_filled = True
+                    logger.info({"step": "password_filled", "selector": selector})
+                    break
+            except:
+                continue
+        
+        if not password_filled:
+            logger.error({"step": "password_field_not_found"})
+            return False
         
         time.sleep(1)
         
@@ -55,7 +99,31 @@ def perform_login(page: Page, account: Dict[str, Any], logger: Logger) -> bool:
             logger.info({"step": "captcha_solved"})
             time.sleep(1)
         
-        page.click('button[type="submit"], button:has-text("Ingresar"), button:has-text("Login")')
+        submit_selectors = [
+            'button[type="submit"]',
+            'button:has-text("Ingresar")',
+            'button:has-text("Login")',
+            'button:has-text("Entrar")',
+            'input[type="submit"]',
+            'button[class*="login" i]',
+            'button[id*="login" i]'
+        ]
+        
+        button_clicked = False
+        for selector in submit_selectors:
+            try:
+                if page.locator(selector).count() > 0:
+                    page.click(selector, timeout=5000)
+                    button_clicked = True
+                    logger.info({"step": "submit_clicked", "selector": selector})
+                    break
+            except:
+                continue
+        
+        if not button_clicked:
+            logger.error({"step": "submit_button_not_found"})
+            return False
+        
         page.wait_for_load_state("networkidle", timeout=30000)
         
         if page.url.find("login") == -1 or page.locator('text=/mi cuenta|account|perfil/i').count() > 0:
@@ -96,10 +164,6 @@ def run_worker(account: Dict[str, Any], account_id: str, proxy: Optional[str], h
             browser, context = create_browser_context(playwright, account_id, proxy, headless)
             page = context.new_page()
             
-            logger.info({"step": "navigate_to_event", "url": EVENT_URL})
-            page.goto(EVENT_URL, wait_until="networkidle", timeout=30000)
-            logger.screenshot(page, "event_page")
-            
             queue_handled = handle_queue(page, logger)
             if not queue_handled:
                 result["error"] = "queue_timeout"
@@ -110,16 +174,10 @@ def run_worker(account: Dict[str, Any], account_id: str, proxy: Optional[str], h
                 if not login_success:
                     result["error"] = "login_failed"
                     return result
-                
-                page.goto(EVENT_URL, wait_until="networkidle", timeout=30000)
-                queue_handled = handle_queue(page, logger)
-                if not queue_handled:
-                    result["error"] = "queue_timeout_after_login"
-                    return result
             
-            ticket_result = select_tickets(page, logger)
-            if not ticket_result.get("success"):
-                result["error"] = f"ticket_selection_failed: {ticket_result.get('error')}"
+            flow_success = handle_allaccess_flow(page, logger, EVENT_URL, TICKET_TYPE, TICKET_COUNT)
+            if not flow_success:
+                result["error"] = "ticket_flow_failed"
                 return result
             
             checkout_result = prepare_checkout(page, account, logger)

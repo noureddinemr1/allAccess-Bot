@@ -44,10 +44,25 @@ Edit `accounts.json` with your login credentials and billing info. Each account 
 python main.py
 ```
 
+**Without proxies (for testing):**
+```bash
+python main.py --no-proxy
+```
+
 **Headless mode (production):**
 ```bash
 python main.py --headless
 ```
+
+**Headless + proxies (full production):**
+```bash
+python main.py --headless
+```
+
+## CLI Options
+
+- `--headless` - Run browsers in background without UI
+- `--no-proxy` - Disable proxies even if configured in .env (useful for testing)
 
 ## Environment Variables
 

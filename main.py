@@ -56,6 +56,7 @@ def save_report(results: List[Dict[str, Any]]):
 def main():
     parser = argparse.ArgumentParser(description="AllAccess Ticket Bot")
     parser.add_argument("--headless", action="store_true", help="Run in headless mode")
+    parser.add_argument("--no-proxy", action="store_true", help="Disable proxies for testing")
     args = parser.parse_args()
     
     try:
@@ -72,11 +73,13 @@ def main():
     max_accounts = min(config.MAX_ACCOUNTS, len(accounts))
     accounts = accounts[:max_accounts]
     
+    proxy_count = 0 if args.no_proxy else len(config.PROXIES) if config.PROXIES else 0
+    
     print(f"🚀 Starting bot for {len(accounts)} account(s)")
     print(f"🎯 Event URL: {config.EVENT_URL}")
     print(f"🎫 Ticket: {config.TICKET_TYPE} x{config.TICKET_COUNT}")
     print(f"👁️  Headless: {args.headless or config.HEADLESS}")
-    print(f"🌐 Proxies: {len(config.PROXIES) if config.PROXIES else 0}")
+    print(f"🌐 Proxies: {proxy_count}{' (disabled)' if args.no_proxy else ''}")
     print()
     
     results = []
@@ -85,7 +88,7 @@ def main():
         futures = {}
         
         for i, account in enumerate(accounts):
-            proxy = get_proxy_for_account(i)
+            proxy = None if args.no_proxy else get_proxy_for_account(i)
             account_id = f"{i:02d}"
             future = executor.submit(run_worker, account, account_id, proxy, args.headless)
             futures[future] = (account_id, account.get("email"))
